@@ -1,7 +1,7 @@
 # RoboRink
 Princeton MAE Senior Thesis 2017 
 
-Brannon Jones,Caleb Peckham, Chad Powers
+Brannon Jones, Caleb Peckham, Chad Powers
 
 Advised by Professor Dan Nosenchuck
 
