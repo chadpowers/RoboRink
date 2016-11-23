@@ -26,6 +26,8 @@ k = 1;
 while hasFrame(swingObj) && ishandle(hf)
     values = readFrame(swingObj);
     d = rgb2hsv(values);
+    d(:,:,1) = d(:,:,1) - 0.1;
+    d(d(:,:,1)<0) = d(d(:,:,1)<0) + 1;
     d = imresize(d,scale);
     next = 0;
     while ~next && ishandle(hf)
@@ -47,6 +49,7 @@ end
 
 function keyDownListener(object, eventdata)
     global a b c next shift
+    clc
     key = eventdata.Key
     if strcmp(key,'q')
         a(1) = max(0,a(1)-shift*0.01);
@@ -77,13 +80,14 @@ function keyDownListener(object, eventdata)
     elseif strcmp(key,'shift')
         shift = 5;
     end
+    [a;b;c]
 end
 
 function keyUpListener(object, eventdata)
     global shift
     key = eventdata.Key
     if strcmp(key,'shift')
-        shift = 5;
+        shift = 1;
     end
 end
 
