@@ -1,7 +1,7 @@
 % First pass at image tacking
 % ImageTrack.m
 
-swingObj = VideoReader('Vd1.mov');
+swingObj = VideoReader('Vd2.mov');
 
 
 %Then, determine the width and height of the video.
@@ -10,7 +10,7 @@ vidHeight = swingObj.Height;
 scale = 1/10;
 
 try 
-    load('rawmov.mat')
+    load('rawmov2.mat')
 catch
 
     %Create a movie structure array, mov.
@@ -30,37 +30,62 @@ catch
         k = k + 1
     end
     
-    save('rawmov.mat','mov')
+    save('rawmov2.mat','mov')
 end
 
 bwmov = struct('cdata',zeros(vidHeight*scale,vidWidth*scale,1,'uint8'),...
         'colormap',[]);
+    
+xmin = 1000;
+xmax = 0;
+ymin = 1000;
+ymax = 0;
 
 %%
+clear centroids d dis1 dis2 dis3 v bw bw_gpu
 centroids = zeros(size(mov,2),2);
+
+
+hf = figure(3);
+set(hf,'position',[10 10 vidWidth/2 vidHeight/2]);
 %Read one frame at a time until the end of the video is reached.
 tic
-for k = 1:size(mov,2)
-    d = int16(mov(k).cdata);
+for k = 500:size(mov,2)
+    % PRINT LOOP NUMBER
     clc
     k
     
-    % move red away from boundaryc
-    d(:,:,1) = d(:,:,1) - 50;
-    d(d(:,:,1)<0) = d(d(:,:,1)<0) + 256;
-    dis1 = d(:,:,1) - 201;
-    dis2 = d(:,:,2) - 227;
-    dis3 = d(:,:,3) - 202;
+    m_pos = [50,53];
     
+    % READ IN RGB VIDEO FRAME   AND
+    % PROCESS TO BINARY
+    mode = 2; % DEFINITELY USE 2, 27.7% Faster than 1
+    if mode == 1
+        d = int16(mov(k).cdata);
+        d(:,:,1) = d(:,:,1) - 50;
+        d(d(:,:,1)<0) = d(d(:,:,1)<0) + 256;
+        dis1 = d(:,:,1) - 201;
+        dis2 = d(:,:,2) - 227;
+        dis3 = d(:,:,3) - 202;
+        v = -double((max(dis1.^2+dis2/20.^2+dis3/20.^2 - 200,0))).^(1/10);
+        v = v-min(min(v));
+        v(:,:) = v/max(max(v));
+        bw_gpu = v>0.95;
+        bw = bw_gpu;
+    elseif mode == 2
+        d = double(mov(k).cdata)/255;
+        a = [0.58, 0.93];
+        b = [0.34, 1.00];
+        c = [0.29, 1.00];
+        d(:,:,1) = d(:,:,1) - 0.1;
+        d(d(:,:,1)<0) = d(d(:,:,1)<0) + 1;
+        d1 = d(:,:,1) > a(1) &  d(:,:,1) < a(2);
+        d2 = d(:,:,2) > b(1) &  d(:,:,2) < b(2);
+        d3 = d(:,:,3) > c(1) &  d(:,:,3) < c(2);
+        bw = d1 & d2 & d3;
+    end
     
-    v = -double((max(dis1.^2+dis2/20.^2+dis3/20.^2 - 200,0))).^(1/10);
-    %pause(0.05)
-    %v = v.^0.1;
-    
-    v = v-min(min(v));
-    v(:,:) = v/max(max(v));
-    bw_gpu = v>0.95;
-    bw = bw_gpu;%gather(bw_gpu);
+    % FIND BLOB
     s = regionprops(bw,'centroid','area');
     if size(s,1) > 0
         [~,idx]=max([s.Area]);
@@ -69,20 +94,90 @@ for k = 1:size(mov,2)
     else
         centroids(k,:) = [0,0];
     end
-%      hf = figure(3);
-%      set(hf,'position',[10 10 vidWidth/2 vidHeight/2]);
-%      imshow(bw)
-%     hold all
-%     plot(centroids(:,1), centroids(:,2),'bo');
-%     plot(centroids(end,1),centroids(end,2),'gO');
-%     hold off
-%     drawnow
-%     bwmov(k).cdata(:,:,1) = uint8((v>0.75)*255);
-%     bwmov(k).cdata(:,:,2) = bwmov(k).cdata(:,:,1);
-%     bwmov(k).cdata(:,:,3) = bwmov(k).cdata(:,:,1);
+    
+    % UPDATE SIDES
+    if (centroids(k,1) > xmax); xmax = centroids(k,1);
+    elseif (centroids(k,1) < xmin); xmin = centroids(k,1); end;
+    if (centroids(k,2) > ymax); ymax = centroids(k,2);
+    elseif (centroids(k,2) < ymin); ymin = centroids(k,2); end;
+    
+    % VELOCITY + TRAJECTORY PREDICTION
+    length = k;%size(centroids,1);
+    if length > 1
+        velo = mean(diff(centroids(max(1,length-3):length,:)));
+        if velo(1) > 0
+            time = 40;%max(0,min(5,(xmax-centroids(k,1))/velo(1)));
+        else
+            time = max(0,min(50,(xmin-centroids(k,1))/velo(1)));
+        end
+        time_variables = 0:1/60:round(time*1.1);
+        trajectory = centroids(k,:)'+ velo'*time_variables;
+        
+        % Y BOUNCE
+        l = 0;
+        while l < 5 && k > 50 && size(trajectory,2) > 0 && (max(trajectory(2,:))>ymax || (min(trajectory(2,:))<ymin))
+            trajectory(2,trajectory(2,:) > ymax) = 2*ymax - trajectory(2,trajectory(2,:) > ymax);
+            trajectory(2,trajectory(2,:) < ymin) = 2*ymin - trajectory(2,trajectory(2,:) < ymin);
+            l = l + 1;
+        end
+        
+        % X BOUNCE
+        l = 5;
+        while l < 5 && k > 50 && size(trajectory,2) > 0 && (max(trajectory(1,:))>xmax || (min(trajectory(1,:))<xmin))
+            trajectory(1,trajectory(1,:) > xmax) = 2*xmax - trajectory(1,trajectory(1,:) > xmax);
+            trajectory(1,trajectory(1,:) < xmin) = 2*xmin - trajectory(1,trajectory(1,:) < xmin);
+            l = l + 1;
+        end
+        
+        % LOCATION DECISON
+        
+        if velo(1) < 0
+            % binary search for lowest x value that is greater than say 50;
+            % use that index's y value to move to that point
+            j = 1;
+            while j < size(trajectory,2) && trajectory(1,j) > 50
+                j = j + 1;
+            end
+            
+            if j == size(trajectory,2)
+                some_y = 53;
+            else
+                some_y = trajectory(2,j);
+            end
+            m_pos = [50,some_y];
+        else
+            % move around the middle
+            m_pos = [50,53];
+        end
+    end
+    
+    
+    
+    
+    % DRAW
+    draw = 1;
+    if draw
+        %clf
+        %title(k/60)
+        imshow(bw,'InitialMagnification','fit')
+        hold all
+        G = linspace(10,100,30)';
+        myGmap = horzcat(zeros(size(G)),G/100, zeros(size(G)));
+        scatter(centroids(k-29:k,1), centroids(k-29:k,2),G+.1,myGmap,'o','filled');
+        scatter(m_pos(1),m_pos(2),1000,[.3,.6,1],'o','filled');
+        plot(centroids(end,1),centroids(end,2),'gO');
+        plot(trajectory(1,:),trajectory(2,:),'r')
+        title(round(k/.6)/100)
+        hold off
+        drawnow
+        %pause(0.1)
+    end
 end
 
-ratio = 60*1.8/(max(centroids(:,1))-min(centroids(:,1)));
+tablelength = 144.6; %(max(centroids(:,1))-min(centroids(:,1)))
+ratio = 60*1.8/tablelength;
+
+clear a b c 
 a = diff(centroids)*ratio;
 b = sqrt(a(:,1).^2+a(:,2).^2);
 
