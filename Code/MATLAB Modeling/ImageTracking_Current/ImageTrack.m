@@ -1,5 +1,6 @@
 % First pass at image tacking
 % ImageTrack.m
+clear all 
 
 swingObj = VideoReader('Vd2.mov');
 
